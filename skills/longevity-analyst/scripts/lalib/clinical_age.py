@@ -243,19 +243,154 @@ def _model_for(spec: dict, row: Dict[str, float]):
     return models.get("pooled") or next(iter(models.values()))
 
 
+def _pairwise_margin_years(bundle: dict) -> float:
+    """Years of predicted-age gap needed before we force A/B.
+
+    Uses 2× holdout regression MAE when present (current joblib ≈ 9 → ~18y).
+    Below that band the comparator is inside its own typical error.
+    """
+    sel = (bundle or {}).get("selection") or {}
+    mae = (sel.get("regression") or {}).get("score")
+    if isinstance(mae, (int, float)) and mae > 0:
+        return float(mae) * 2.0
+    return 10.0
+
+
+def _pairwise_from_ages(ages: List[float], margin: float) -> dict:
+    gap = abs(float(ages[0]) - float(ages[1]))
+    out = {
+        "predicted_age": [round(float(a), 1) for a in ages[:2]],
+        "age_gap": round(gap, 1),
+        "margin_years": round(float(margin), 1),
+    }
+    if gap < margin:
+        out.update(
+            {
+                "answer": "uncertain",
+                "confidence": "low",
+                "reason": "predicted age gap below model uncertainty band; do not force A/B",
+            }
+        )
+        return out
+    out["answer"] = "A" if ages[0] >= ages[1] else "B"
+    out["confidence"] = "moderate"
+    return out
+
+
+def _pairwise_from_ranker(
+    people: List[Dict[str, float]], bundle: dict
+) -> Optional[dict]:
+    """Direction B hybrid pairwise comparator.
+
+    1) Age-regression scores for both people (side channel + far-gap decisions).
+    2) If predicted age gap ≥ `hybrid_gap_years`, trust the age models.
+    3) Else use the age-delta ranker on feature diffs A−B; abstain when
+       |delta| < `delta_abstain` (near-age / bio–chrono conflict band).
+    """
+    import numpy as np
+
+    ranker = (bundle or {}).get("pairwise_ranker") or {}
+    model = ranker.get("model")
+    feats = ranker.get("features") or _FEATURES
+    if model is None or len(people) < 2:
+        return None
+
+    ages: List[float] = []
+    spec = bundle.get("pairwise")
+    if spec:
+        try:
+            ages = [
+                float(_model_for(spec, p).predict(_row_matrix(p, spec["features"]))[0])
+                for p in people[:2]
+            ]
+        except Exception:
+            ages = []
+    age_gap = abs(ages[0] - ages[1]) if len(ages) == 2 else None
+    hybrid_gap = float(ranker.get("hybrid_gap_years") or 12.0)
+
+    out: dict = {
+        "caller": "clinical_pairwise_ranker",
+        "kind": ranker.get("kind"),
+    }
+    if ages:
+        out["predicted_age"] = [round(x, 1) for x in ages]
+        out["age_gap"] = round(float(age_gap), 1) if age_gap is not None else None
+
+    # Far gap: age models are reliable on LongevityBench (≈0.81 forced).
+    if age_gap is not None and age_gap >= hybrid_gap:
+        out.update(
+            {
+                "answer": "A" if ages[0] >= ages[1] else "B",
+                "confidence": "moderate",
+                "reason": "age-regression gap above hybrid threshold",
+                "hybrid_gap_years": hybrid_gap,
+            }
+        )
+        return out
+
+    a = np.array([people[0].get(f, np.nan) for f in feats], dtype=float)
+    b = np.array([people[1].get(f, np.nan) for f in feats], dtype=float)
+    diff = (a - b).reshape(1, -1)
+    kind = (ranker.get("kind") or "").lower()
+
+    if kind == "hgb_age_delta" or ranker.get("delta_abstain") is not None:
+        delta = float(model.predict(diff)[0])
+        abstain = float(ranker.get("delta_abstain") or 3.5)
+        out["age_delta"] = round(delta, 2)
+        out["delta_abstain"] = abstain
+        out["hybrid_gap_years"] = hybrid_gap
+        if abs(delta) < abstain:
+            out.update(
+                {
+                    "answer": "uncertain",
+                    "confidence": "low",
+                    "reason": (
+                        "near-age band: lab-derived age delta inside abstain margin "
+                        "(possible bio vs chronological conflict)"
+                    ),
+                }
+            )
+            return out
+        out["answer"] = "A" if delta >= 0 else "B"
+        out["confidence"] = "moderate"
+        out["reason"] = "age-delta ranker"
+        return out
+
+    # Legacy probability ranker
+    proba = float(model.predict_proba(diff)[0, 1])
+    margin = float(ranker.get("proba_margin") or 0.08)
+    out["proba_A_older"] = round(proba, 4)
+    out["proba_margin"] = margin
+    if abs(proba - 0.5) < margin:
+        out.update(
+            {
+                "answer": "uncertain",
+                "confidence": "low",
+                "reason": "pairwise ranker probability inside abstain margin",
+            }
+        )
+        return out
+    out["answer"] = "A" if proba >= 0.5 else "B"
+    out["confidence"] = "moderate"
+    return out
+
+
 def _from_models(text: str, fmt: str, people: List[Dict[str, float]]) -> Optional[dict]:
     bundle = _bundle()
     if not bundle or not people or not any(people):
         return None
     if fmt == "pairwise":
-        spec = bundle["pairwise"]
         if len(people) < 2:
             return None
+        ranked = _pairwise_from_ranker(people, bundle)
+        if ranked is not None:
+            return ranked
+        spec = bundle["pairwise"]
         ages = [
             float(_model_for(spec, p).predict(_row_matrix(p, spec["features"]))[0])
             for p in people[:2]
         ]
-        return {"answer": "A" if ages[0] >= ages[1] else "B", "predicted_age": [round(a, 1) for a in ages]}
+        return _pairwise_from_ages(ages, _pairwise_margin_years(bundle))
     if fmt == "regression":
         spec = bundle["regression"]
         age = float(_model_for(spec, people[0]).predict(_row_matrix(people[0], spec["features"]))[0])
@@ -293,8 +428,8 @@ def answer(text: str, fmt: str, adjust=None, follow: str = "") -> Optional[dict]
     if fmt == "pairwise":
         if len(ages) < 2:
             return None
-        letter = "A" if ages[0] >= ages[1] else "B"
-        return {"answer": letter, "predicted_age": [round(a, 1) for a in ages[:2]]}
+        bundle = _bundle() or {}
+        return _pairwise_from_ages(ages[:2], _pairwise_margin_years(bundle))
     if fmt == "regression":
         return {"answer": round(ages[0], 1)}
     if fmt == "multiclass":

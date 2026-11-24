@@ -1,7 +1,8 @@
 """Run one LongevityBench prompt through a named Longevity-LLM.
 
 Weights are loaded once per process. The caller must pass the Hugging Face
-repository id from bench_route.REPOS. Training splits are never used here.
+repository id from bench_route control metadata. Training splits are never used here.
+Called only via `la.py bench --control-model` (对照); never the default Skill answer path.
 
 On Apple Silicon, prefer the MLX 4-bit conversion of L-Qwen3.5-9B when present
 (`…/longevity-llm-mlx-4bit`); full bf16 weights OOM on typical MPS budgets.

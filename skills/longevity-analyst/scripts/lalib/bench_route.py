@@ -1,8 +1,12 @@
-"""Route one LongevityBench prompt to a formula or an open model.
+"""Route one LongevityBench prompt to a formula or the host LLM.
 
 Member reports stay on workflows 01–06. This module does not read a workspace,
 does not call a clock, and does not query OpenGenes or SynergyAge.
-Open models are named here. Inference runs only after a runner is wired.
+
+Default paths are formula | host | uncovered. Paper Longevity-LLM names appear
+only under `control` metadata for optional对照 runs (--control-model).
+lb_id / detect_task are eval-adapter hints for scoring tables; the product path
+is schema (family/format + whether a formula can run), not "task id → download model".
 """
 from __future__ import annotations
 
@@ -12,7 +16,7 @@ import re
 from pathlib import Path
 from typing import Dict, Optional
 
-# Paper names and the repositories on the Longevity-LLM collection.
+# Paper names and the repositories on the Longevity-LLM collection (control only).
 REPOS = {
     "L-Qwen3.5-9B": "insilicomedicine/longevity-llm",
     "L-Qwen3-0.6B": "insilicomedicine/Qwen3-0.6B-Longevity",
@@ -25,20 +29,30 @@ _DATA = Path(__file__).resolve().parents[2] / "data"
 _MODEL = _DATA / "clinical_models.joblib"
 _COX = _DATA / "clinical_cox.json"
 _PROTEIN = _DATA / "protein_elasticnet.json"
+_PROTEIN_CLOCK = _DATA / "protein_clock.json"
 _PROTEIN_ALT = (
     Path(os.environ["LONGEVITYBENCH_OLINK"]) / "protein_elasticnet.json"
     if os.environ.get("LONGEVITYBENCH_OLINK")
     else None
 )
-# Optional local checkpoints via LONGEVITY_LLM_HOME/<repo-name>.
+# Optional local checkpoints via LONGEVITY_LLM_HOME/<repo-name> (control only).
 _LLM_HOME = Path(os.environ["LONGEVITY_LLM_HOME"]) if os.environ.get("LONGEVITY_LLM_HOME") else None
 _LOCAL_MODELS = {
     "L-Qwen3.5-9B": (_LLM_HOME / "longevity-llm") if _LLM_HOME else None,
     "L-LFM2-1.2B": (_LLM_HOME / "LFM2-1.2B-Longevity") if _LLM_HOME else None,
 }
 
-# paper_best is the better of Table S6 ML and Best LLM (lower MAE for regression).
-# SynergyAge has no ML in S6; absolute scores come from Table S3 (mmc3.xlsx).
+
+def _control(name: str) -> Dict[str, Optional[str]]:
+    local = _LOCAL_MODELS.get(name)
+    return {
+        "name": name,
+        "repo": REPOS[name],
+        "local_path": str(local) if local else None,
+    }
+
+
+# paper_best is a published reference number for对照 tables (not a Skill pass bar).
 _TASKS = {
     "LB-0034": {
         "family": "clinical_age", "format": "pairwise", "kind": "formula",
@@ -49,7 +63,7 @@ _TASKS = {
             "metric": "concordance", "value": 0.81, "higher_is_better": True,
             "source": "Table S6 ML:hgb",
         },
-        "repo": None,
+        "control": None,
         "note": "Gradient boosting fit on NHANES 2003-2017. Eval years are 1999 and 2001.",
     },
     "LB-0030": {
@@ -61,7 +75,7 @@ _TASKS = {
             "metric": "balanced_accuracy", "value": 0.43, "higher_is_better": True,
             "source": "Table S6 ML:logreg",
         },
-        "repo": None,
+        "control": None,
         "note": "Pooled elastic-net logistic regression fit on NHANES 2003-2017.",
     },
     "LB-0038": {
@@ -73,7 +87,7 @@ _TASKS = {
             "metric": "mae_years", "value": 11.55, "higher_is_better": False,
             "source": "Table S6 ML:elasticnet",
         },
-        "repo": None,
+        "control": None,
         "note": "Pooled elastic net fit on NHANES 2003-2017.",
     },
     "LB-0042": {
@@ -85,60 +99,60 @@ _TASKS = {
             "metric": "balanced_accuracy", "value": 0.81, "higher_is_better": True,
             "source": "Table S6 ML:cox (best LLM Sonnet-4.6 0.808)",
         },
-        "repo": None,
+        "control": None,
         "note": "Cox fit on NHANES 2003-2017. Score with balanced accuracy, not raw accuracy.",
     },
     "LB-0050": {
-        "family": "clinical_mortality", "format": "pairwise", "kind": "model",
-        "target": "L-Qwen3.5-9B",
+        "family": "clinical_mortality", "format": "pairwise", "kind": "host",
+        "target": "host",
         "do_not_call": ["one-year-mortality-aging-marker"],
         "wired": True,
         "paper_best": {
             "metric": "concordance", "value": 0.684, "higher_is_better": True,
             "source": "Table S6 best LLM L-Qwen3.5-9B (ML:cox 0.65)",
         },
-        "repo": REPOS["L-Qwen3.5-9B"],
-        "note": "Published best is the 9B. Local Cox stays a control only and is not the parity target.",
+        "control": _control("L-Qwen3.5-9B"),
+        "note": "Default path is Host+tools. Longevity-LLM is control only.",
     },
     "LB-0046": {
-        "family": "clinical_mortality", "format": "multiclass", "kind": "model",
-        "target": "L-Qwen3.5-9B",
+        "family": "clinical_mortality", "format": "multiclass", "kind": "host",
+        "target": "host",
         "do_not_call": ["one-year-mortality-aging-marker"],
         "wired": True,
         "paper_best": {
             "metric": "balanced_accuracy", "value": 0.389, "higher_is_better": True,
             "source": "Table S6 best LLM gemini-3-pro (ML:cox_rmst_bin 0.30)",
         },
-        "repo": REPOS["L-Qwen3.5-9B"],
-        "note": "Published best is an LLM. Local bin classifier is a control only.",
+        "control": _control("L-Qwen3.5-9B"),
+        "note": "Default path is Host+tools. Longevity-LLM is control only.",
     },
     "LB-0006": {
-        "family": "methylation", "format": "pairwise", "kind": "model",
-        "target": "L-Qwen3.5-9B",
+        "family": "methylation", "format": "pairwise", "kind": "host",
+        "target": "host",
         "do_not_call": ["epiage", "pyaging", "horvath"],
         "wired": True,
         "paper_best": {
             "metric": "concordance", "value": 0.868, "higher_is_better": True,
             "source": "Table S6 best LLM L-Qwen3.5-9B",
         },
-        "repo": REPOS["L-Qwen3.5-9B"],
-        "note": "One user prompt in, one exam field out.",
+        "control": _control("L-Qwen3.5-9B"),
+        "note": "Rotating sites; fixed clocks stay in do_not_call. Default is Host+tools.",
     },
     "LB-0010": {
-        "family": "methylation", "format": "regression", "kind": "model",
-        "target": "L-Qwen3.5-9B",
+        "family": "methylation", "format": "regression", "kind": "host",
+        "target": "host",
         "do_not_call": ["epiage", "pyaging", "horvath"],
         "wired": True,
         "paper_best": {
             "metric": "mae_years", "value": 12.96, "higher_is_better": False,
             "source": "Table S6 best LLM L-Qwen3.5-9B",
         },
-        "repo": REPOS["L-Qwen3.5-9B"],
-        "note": "One user prompt in, one exam field out.",
+        "control": _control("L-Qwen3.5-9B"),
+        "note": "Rotating sites; fixed clocks stay in do_not_call. Default is Host+tools.",
     },
     "LB-0002": {
-        "family": "methylation", "format": "multiclass", "kind": "model",
-        "target": "L-Qwen3.5-9B",
+        "family": "methylation", "format": "multiclass", "kind": "host",
+        "target": "host",
         "do_not_call": ["epiage", "pyaging", "horvath"],
         "wired": True,
         "paper_best": {
@@ -146,32 +160,32 @@ _TASKS = {
             "source": "parity is 9B's own Table S3 score; task-best LLM grok-4 is 0.203",
             "task_best_llm": {"model": "grok-4", "value": 0.203},
         },
-        "repo": REPOS["L-Qwen3.5-9B"],
-        "note": "Route stays on 9B. Do not use grok-4's 0.203 as the 9B parity number.",
+        "control": _control("L-Qwen3.5-9B"),
+        "note": "Default path is Host+tools. Do not treat grok-4 0.203 as a Skill pass bar.",
     },
     "LB-0018": {
-        "family": "transcriptome", "format": "pairwise", "kind": "model",
-        "target": "L-Qwen3.5-9B",
+        "family": "transcriptome", "format": "pairwise", "kind": "host",
+        "target": "host",
         "do_not_call": [],
         "wired": True,
         "paper_best": {
             "metric": "concordance", "value": 0.676, "higher_is_better": True,
             "source": "Table S6 best LLM L-Qwen3.5-9B",
         },
-        "repo": REPOS["L-Qwen3.5-9B"],
-        "note": "One user prompt in, one exam field out.",
+        "control": _control("L-Qwen3.5-9B"),
+        "note": "Default path is Host+tools. Longevity-LLM is control only.",
     },
     "LB-0014": {
-        "family": "transcriptome", "format": "multiclass", "kind": "model",
-        "target": "L-Qwen3.5-9B",
+        "family": "transcriptome", "format": "multiclass", "kind": "host",
+        "target": "host",
         "do_not_call": [],
         "wired": True,
         "paper_best": {
             "metric": "balanced_accuracy", "value": 0.223, "higher_is_better": True,
             "source": "Table S6 best LLM L-Qwen3.5-9B",
         },
-        "repo": REPOS["L-Qwen3.5-9B"],
-        "note": "One user prompt in, one exam field out.",
+        "control": _control("L-Qwen3.5-9B"),
+        "note": "Default path is Host+tools. Longevity-LLM is control only.",
     },
     "LB-0299": {
         "family": "protein", "format": "pairwise", "kind": "formula",
@@ -182,7 +196,7 @@ _TASKS = {
             "metric": "concordance", "value": 0.75, "higher_is_better": True,
             "source": "Table S6 ML:protein_clock",
         },
-        "repo": None,
+        "control": None,
         "note": "Goeminne OrganAge Conventional fold-0 on prompt NPX.",
     },
     "LB-0074": {
@@ -194,7 +208,7 @@ _TASKS = {
             "metric": "balanced_accuracy", "value": 0.56, "higher_is_better": True,
             "source": "Table S6 ML:protein_clock",
         },
-        "repo": None,
+        "control": None,
         "note": "Goeminne OrganAge Conventional fold-0; age decade from predicted age.",
     },
     "LB-0082": {
@@ -206,44 +220,44 @@ _TASKS = {
             "metric": "mae_years", "value": 3.94, "higher_is_better": False,
             "source": "Table S6 ML:elasticnet",
         },
-        "repo": None,
+        "control": None,
         "note": "De novo elastic net on consensus proteins; eval kitGuids excluded from fit.",
     },
     "LB-0086": {
-        "family": "opengenes", "format": "binary", "kind": "model",
-        "target": "L-LFM2-1.2B",
+        "family": "opengenes", "format": "binary", "kind": "host",
+        "target": "host",
         "do_not_call": ["opengenes"],
         "wired": True,
         "paper_best": {
             "metric": "accuracy", "value": 0.780, "higher_is_better": True,
             "source": "main text L-LFM2-1.2B (9B 0.710)",
         },
-        "repo": REPOS["L-LFM2-1.2B"],
-        "note": "A masked gene name is not looked up in OpenGenes.",
+        "control": _control("L-LFM2-1.2B"),
+        "note": "Masked gene name is not looked up in OpenGenes. Default is Host+tools.",
     },
     "LB-0122": {
-        "family": "synergyage", "format": "pairwise", "kind": "model",
-        "target": "L-Qwen3.5-9B",
+        "family": "synergyage", "format": "pairwise", "kind": "host",
+        "target": "host",
         "do_not_call": ["synergy-age"],
         "wired": True,
         "paper_best": {
             "metric": "concordance", "value": 0.846, "higher_is_better": True,
             "source": "Table S3 Claude-Opus-4.5 (L-Qwen3.5-9B 0.731)",
         },
-        "repo": REPOS["L-Qwen3.5-9B"],
-        "note": "Exam prompts are not answered by querying SynergyAge. Score via MLX 9B when run.",
+        "control": _control("L-Qwen3.5-9B"),
+        "note": "Do not query SynergyAge on exam prompts. Default is Host+tools.",
     },
     "LB-0126": {
-        "family": "synergyage", "format": "regression", "kind": "model",
-        "target": "L-Qwen3.5-9B",
+        "family": "synergyage", "format": "regression", "kind": "host",
+        "target": "host",
         "do_not_call": ["synergy-age"],
         "wired": True,
         "paper_best": {
             "metric": "mae_percent_lifespan", "value": 11.96, "higher_is_better": False,
             "source": "Table S3 Claude-Opus-4.5 (L-Qwen3.5-9B 12.38)",
         },
-        "repo": REPOS["L-Qwen3.5-9B"],
-        "note": "Exam prompts are not answered by querying SynergyAge. Score via MLX 9B when run.",
+        "control": _control("L-Qwen3.5-9B"),
+        "note": "Do not query SynergyAge on exam prompts. Default is Host+tools.",
     },
 }
 
@@ -319,55 +333,149 @@ def detect_task(text: str) -> Optional[str]:
     return None
 
 
-def route(text: str = "", lb_id: Optional[str] = None) -> Dict[str, object]:
-    """Return the route for one exam prompt.
+def _formula_wired(target: str) -> tuple[bool, str]:
+    if target in ("clinical_hgb", "clinical_elasticnet"):
+        if _MODEL.is_file():
+            return True, ""
+        return False, f"missing formula weights: {_MODEL}"
+    if target == "clinical_cox":
+        if _COX.is_file():
+            return True, ""
+        return False, f"missing formula weights: {_COX}"
+    if target == "protein_elasticnet":
+        alt_ok = bool(_PROTEIN_ALT and _PROTEIN_ALT.is_file())
+        if _PROTEIN.is_file() or alt_ok:
+            return True, ""
+        return False, f"missing formula weights: {_PROTEIN}"
+    if target == "protein_clock":
+        if _PROTEIN_CLOCK.is_file():
+            return True, ""
+        return False, f"missing formula weights: {_PROTEIN_CLOCK}"
+    return False, f"unknown formula target: {target}"
 
-    `callable` stays false until a connected caller returns the exam field.
+
+def _families() -> Dict[str, Dict[str, object]]:
+    """Collapse task table into schema keys (family, format) → route policy.
+
+    Product path uses this map. LongevityBench ids are eval metadata only.
+    """
+    out: Dict[str, Dict[str, object]] = {}
+    for lb_id, spec in _TASKS.items():
+        key = f"{spec['family']}|{spec['format']}"
+        # First canonical task wins; mini aliases share the same family/format.
+        if key not in out:
+            out[key] = {
+                "family": spec["family"],
+                "format": spec["format"],
+                "kind": spec["kind"],
+                "target": spec["target"],
+                "do_not_call": list(spec["do_not_call"]),
+                "wired": bool(spec["wired"]),
+                "note": spec["note"],
+                "example_lb_id": lb_id,  # eval hint only
+                "control": spec.get("control"),
+                "paper_best": spec.get("paper_best"),
+            }
+    return out
+
+
+_SCHEMA = _families()
+
+
+def route_by_schema(family: str, fmt: str) -> Dict[str, object]:
+    """Route by input schema alone — the product-facing entry point.
+
+    Does not require an LB-xxxx id. Does not download Longevity-LLM.
+    """
+    family = (family or "").strip().lower()
+    fmt = (fmt or "").strip().lower()
+    key = f"{family}|{fmt}"
+    spec = _SCHEMA.get(key)
+    if not spec:
+        known = sorted(_SCHEMA.keys())
+        return {
+            "status": "unrouted",
+            "capability": "A",
+            "family": family,
+            "format": fmt,
+            "path": "uncovered",
+            "callable": False,
+            "reason": f"unknown schema {key!r}; known: {known}",
+        }
+    kind = spec["kind"]
+    target = spec["target"]
+    missing = ""
+    if kind == "formula":
+        wired, missing = _formula_wired(target)
+        path = "formula" if wired else "uncovered"
+    else:
+        wired = bool(spec["wired"])
+        path = "host"
+    out: Dict[str, object] = {
+        "status": "routed",
+        "capability": "A",
+        "family": family,
+        "format": fmt,
+        "kind": kind,
+        "target": target,
+        "path": path,
+        "do_not_call": spec["do_not_call"],
+        "wired": wired,
+        "callable": False,
+        "writes_report": False,
+        "host_protocol": fmt if path == "host" else None,
+        "note": spec["note"],
+        "schema_key": key,
+        # Eval-only fields kept optional for adapters that still tabulate by id.
+        "example_lb_id": spec.get("example_lb_id"),
+        "paper_best": spec.get("paper_best"),
+        "control": spec.get("control"),
+    }
+    if missing:
+        out["reason"] = missing
+    if path == "uncovered" and kind == "formula":
+        out["note"] = (spec["note"] + " " if spec["note"] else "") + (
+            "Formula weights missing; treat as uncovered until weights are installed."
+        )
+    return out
+
+
+def list_schemas() -> list:
+    return sorted(_SCHEMA.keys())
+
+
+def route(text: str = "", lb_id: Optional[str] = None) -> Dict[str, object]:
+    """Return the route for one exam prompt (eval adapter).
+
+    Prefer `route_by_schema` for product paths. `path` is formula | host |
+    uncovered. `callable` stays false until a formula caller fills an exam
+    field. Host answers are produced by the host LLM outside this module.
+    Longevity-LLM is never the default path.
     """
     paper_id = canonical_id(lb_id) or detect_task(text)
     if paper_id not in _TASKS:
         return {
             "status": "unrouted",
+            "capability": "A",
             "lb_id": paper_id,
+            "path": "uncovered",
             "callable": False,
             "reason": "prompt is not one of the 17 LongevityBench tasks",
         }
     spec = _TASKS[paper_id]
-    if spec["target"] in ("clinical_hgb", "clinical_elasticnet"):
-        wired = bool(spec["wired"] and _MODEL.is_file())
-    elif spec["target"] == "clinical_cox":
-        wired = bool(spec["wired"] and _COX.is_file())
-    elif spec["target"] == "protein_elasticnet":
-        alt_ok = bool(_PROTEIN_ALT and _PROTEIN_ALT.is_file())
-        wired = bool(spec["wired"] and (_PROTEIN.is_file() or alt_ok))
-    elif spec["target"] == "protein_clock":
-        clock = _DATA / "protein_clock.json"
-        wired = bool(spec["wired"] and clock.is_file())
-    elif spec["kind"] == "model":
-        local = _LOCAL_MODELS.get(spec["target"])
-        wired = bool(spec["wired"] and local and (local / "config.json").is_file())
-    else:
-        wired = bool(spec["wired"])
-    local_path = _LOCAL_MODELS.get(spec["target"])
-    out = {
-        "status": "routed",
-        "lb_id": paper_id,
-        "family": spec["family"],
-        "format": spec["format"],
-        "kind": spec["kind"],
-        "target": spec["target"],
-        "do_not_call": spec["do_not_call"],
-        "wired": wired,
-        "callable": False,
-        "writes_report": False,
-        "paper_best": spec["paper_best"],
-        "repo": spec["repo"],
-        "local_path": str(local_path) if local_path else None,
-        "note": spec["note"],
-    }
+    # Delegate policy to schema route so product and eval stay consistent.
+    base = route_by_schema(spec["family"], spec["format"])
+    base["lb_id"] = paper_id
+    base["paper_best"] = spec["paper_best"]
+    base["control"] = spec.get("control")
+    base["note"] = spec["note"]
+    if base.get("path") == "uncovered" and spec["kind"] == "formula":
+        wired, missing = _formula_wired(spec["target"])
+        if not wired and missing:
+            base["reason"] = missing
     if spec.get("candidates"):
-        out["candidates"] = spec["candidates"]
-    return out
+        base["candidates"] = spec["candidates"]
+    return base
 
 
 def route_json(text: str = "", lb_id: Optional[str] = None) -> str:

@@ -21,7 +21,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lalib import board, causal, genomics, pgx, reference, surveillance, wearable
 from lalib import common as C  # noqa: E402
 from lalib import evidence, integrate, intake, methods, organs, pipelines, preflight, report, twin  # noqa: E402
-from lalib import bench_route, clinical_age, clinical_mortality, open_llm, protein_age  # noqa: E402
+from lalib import (  # noqa: E402
+    bench_route,
+    clinical_age,
+    clinical_mortality,
+    host_protocol,
+    method_gate,
+    open_llm,
+    protein_age,
+)
 
 SEX = {"m": "male", "male": "male", "男": "male", "f": "female", "female": "female", "女": "female"}
 
@@ -35,36 +43,120 @@ def _open(a, lock: bool = True):
 
 # ---------------------------------------------------------------- LongevityBench (no member workspace)
 def cmd_bench(a):
-    """Route one exam prompt. No workspace, no report, no answer while the caller is unwired."""
+    """Route one exam prompt. Default paths: formula | host | uncovered.
+
+    Longevity-LLM runs only with --control-model (对照); it never fills `answer`.
+    """
     text = Path(a.prompt).read_text()
     result = bench_route.route(text, a.lb_id or None)
-    if result.get("target") in ("clinical_hgb", "clinical_elasticnet") and result.get("wired"):
+    if result.get("path") == "formula" and result.get("target") in ("clinical_hgb", "clinical_elasticnet") and result.get("wired"):
         got = clinical_age.answer(text, result.get("format") or "", follow=a.follow_up or "")
         if got:
             result["callable"] = True
             result["answer"] = got["answer"]
             result["caller"] = result["target"]
-    elif result.get("target") == "clinical_cox" and result.get("wired"):
+            for k in (
+                "predicted_age",
+                "age_gap",
+                "margin_years",
+                "confidence",
+                "reason",
+                "age_delta",
+                "delta_abstain",
+                "hybrid_gap_years",
+                "caller",
+                "kind",
+                "proba_A_older",
+            ):
+                if k in got:
+                    result[k] = got[k]
+            if got.get("answer") == "uncertain":
+                # Still a formula path: honest abstain inside the model error band.
+                result["formula_abstain"] = True
+    elif result.get("path") == "formula" and result.get("target") == "clinical_cox" and result.get("wired"):
         got = clinical_mortality.answer(text, result.get("format") or "", follow=a.follow_up or "")
         if got:
             result["callable"] = True
             result["answer"] = got["answer"]
             result["caller"] = "clinical_cox"
-    elif result.get("target") in ("protein_elasticnet", "protein_clock") and result.get("wired"):
+    elif result.get("path") == "formula" and result.get("target") in ("protein_elasticnet", "protein_clock") and result.get("wired"):
         got = protein_age.answer(text, result.get("format") or "")
         if got:
             result["callable"] = True
             result["answer"] = got["answer"]
             result["caller"] = result["target"]
-    elif result.get("kind") == "model" and result.get("wired") and a.run_model:
-        repo = a.model_path or result.get("local_path") or result.get("repo")
+
+    want_control = bool(getattr(a, "control_model", False) or getattr(a, "run_model", False))
+    if want_control and result.get("control"):
+        ctrl = result["control"] or {}
+        repo = a.model_path or ctrl.get("local_path") or ctrl.get("repo")
         if repo:
             got = open_llm.answer(text, result.get("format") or "", repo)
             if got:
-                result["callable"] = True
-                result["answer"] = got["answer"]
-                result["caller"] = result["target"]
+                result["control_answer"] = got["answer"]
+                result["control_caller"] = ctrl.get("name")
+                # Do not set result["answer"] from Longevity-LLM; default answer is Host/formula.
     C.emit(result)
+
+
+def cmd_schema_route(a):
+    """Product-facing route by family+format (capability A). No LB id, no Longevity-LLM download."""
+    if a.list_schemas:
+        C.emit({"schemas": bench_route.list_schemas()})
+        return C.EXIT_OK
+    if not a.family or not a.format:
+        raise C.LAError("pass --family and --format, or --list", C.EXIT_USAGE)
+    result = bench_route.route_by_schema(a.family, a.format)
+    C.emit(result)
+    return C.EXIT_OK if result.get("status") == "routed" else C.EXIT_BLOCKED
+
+
+def cmd_method_gate(a):
+    """Deterministic method-library gates (units, features, exam refuses, safety flags)."""
+    if a.action == "units":
+        result = method_gate.normalize_clinical_value(a.marker, float(a.value), a.unit)
+    elif a.action == "features":
+        required = [x.strip() for x in (a.required or "").split(",") if x.strip()]
+        available = [x.strip() for x in (a.available or "").split(",") if x.strip()]
+        result = method_gate.features_present(required, available)
+    elif a.action == "methylation-clock":
+        result = method_gate.refuse_fixed_clock_on_rotating_sites(a.method_id)
+    elif a.action == "phenoage-chrono":
+        result = method_gate.refuse_phenoage_without_chrono_age(
+            a.method_id, chronological_age_present=bool(a.has_chrono_age)
+        )
+    elif a.action == "gene-db":
+        # Default gene_masked=True for exam prompts; pass --gene-named to allow member lookup.
+        masked = not bool(getattr(a, "gene_named", False))
+        result = method_gate.refuse_gene_db_on_masked_exam(a.method_id, gene_name_masked=masked)
+    elif a.action == "safety":
+        flags = {}
+        if a.flags_json:
+            flags = json.loads(Path(a.flags_json).read_text() if Path(a.flags_json).is_file() else a.flags_json)
+        result = method_gate.safety_gate_intervention(flags)
+    else:
+        raise C.LAError(f"unknown method-gate action {a.action!r}", C.EXIT_USAGE)
+    C.emit(result)
+    return C.EXIT_OK if result.get("ok") else C.EXIT_BLOCKED
+
+
+def cmd_protocol_check(a):
+    """Validate a Host answer against the capability A/B output protocol."""
+    if a.kind == "longevitybench":
+        if not a.format:
+            raise C.LAError("--format is required for --kind longevitybench", C.EXIT_USAGE)
+        if a.text == "" and not a.json_path:
+            raise C.LAError("pass --text with the Host answer", C.EXIT_USAGE)
+        text = a.text
+        if a.json_path and not text:
+            text = Path(a.json_path).read_text()
+        result = host_protocol.check_longevitybench(text, a.format)
+    else:
+        if not a.json_path:
+            raise C.LAError("pass --json <file> for --kind jarchow", C.EXIT_USAGE)
+        result = host_protocol.check_jarchow(a.json_path)
+    C.emit(result)
+    return C.EXIT_OK if result.get("ok") else C.EXIT_BLOCKED
 
 
 # ---------------------------------------------------------------- setup
@@ -1109,13 +1201,68 @@ def build_parser():
     s.add_argument("--findings")
     s.set_defaults(fn=cmd_review)
 
-    s = sub.add_parser("bench", help="route one LongevityBench prompt; does not touch a member workspace")
+    s = sub.add_parser(
+        "schema-route",
+        help="product route by family+format (capability A); no LB id; no Longevity-LLM download",
+    )
+    s.add_argument("--family", default="", help="e.g. clinical_age, methylation, protein")
+    s.add_argument("--format", default="", help="pairwise|binary|multiclass|regression")
+    s.add_argument("--list", action="store_true", dest="list_schemas", help="list known schema keys")
+    s.set_defaults(fn=cmd_schema_route)
+
+    s = sub.add_parser(
+        "method-gate",
+        help="method-library gates: units / features / exam refuses / safety flags",
+    )
+    s.add_argument(
+        "action",
+        choices=[
+            "units",
+            "features",
+            "methylation-clock",
+            "phenoage-chrono",
+            "gene-db",
+            "safety",
+        ],
+    )
+    s.add_argument("--marker", default="")
+    s.add_argument("--value", default="")
+    s.add_argument("--unit", default="")
+    s.add_argument("--required", default="", help="comma-separated required feature names")
+    s.add_argument("--available", default="", help="comma-separated available feature names")
+    s.add_argument("--method-id", default="", dest="method_id")
+    s.add_argument(
+        "--has-chrono-age",
+        action="store_true",
+        dest="has_chrono_age",
+        help="phenoage-chrono: chronological age is present in the input",
+    )
+    s.add_argument(
+        "--gene-named",
+        action="store_true",
+        dest="gene_named",
+        help="gene-db: real gene symbol is known (member lookup allowed)",
+    )
+    s.add_argument("--flags-json", default="", dest="flags_json", help="JSON object or path for safety flags")
+    s.set_defaults(fn=cmd_method_gate)
+
+    s = sub.add_parser("bench", help="eval adapter: route one LongevityBench prompt (formula|host|uncovered)")
     s.add_argument("--prompt", required=True, help="user prompt file, with the assistant answer removed")
-    s.add_argument("--lb-id", default="", help="paper id such as LB-0034, or a mini-split id")
+    s.add_argument("--lb-id", default="", help="paper id such as LB-0034 (eval hint only)")
     s.add_argument("--follow-up", default="", help="optional text with SEQN, for the 1999-2000 creatinine correction")
-    s.add_argument("--run-model", action="store_true", help="load and run the open Longevity-LLM named in the route")
-    s.add_argument("--model-path", default="", help="local checkpoint path overriding the route repository")
+    s.add_argument("--control-model", action="store_true",
+                   help="optional对照: load Longevity-LLM named in route.control; writes control_answer only")
+    s.add_argument("--run-model", action="store_true",
+                   help="deprecated alias for --control-model")
+    s.add_argument("--model-path", default="", help="local checkpoint path overriding route.control")
     s.set_defaults(fn=cmd_bench)
+
+    s = sub.add_parser("protocol-check", help="validate Host output against LongevityBench or Jarchow protocol")
+    s.add_argument("--kind", required=True, choices=["longevitybench", "jarchow"])
+    s.add_argument("--format", default="", help="longevitybench: pairwise|binary|multiclass|regression")
+    s.add_argument("--text", default="", help="longevitybench: raw Host answer text")
+    s.add_argument("--json", default="", dest="json_path", help="jarchow: path to JSON file with five axes")
+    s.set_defaults(fn=cmd_protocol_check)
     return p
 
 

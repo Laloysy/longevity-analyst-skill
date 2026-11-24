@@ -56,6 +56,18 @@ library path in the workspace, so later commands find it without any environment
 - `$LA report` also writes `deliver/la-export.json` (schema `la-export/1`), which `import_analysis` reads. The plan
   becomes a longpi plan only after the member hears it read back and confirms.
 
+## Product path vs LongevityBench
+
+**Product entry is longevity-coach**, not this skill’s bench adapter.
+
+| 场景 | 谁接 | 做什么 |
+|---|---|---|
+| 会员交来**数据文件夹**，要多组学报告 / 孪生 / 复测对比 | 教练 → 本技能 **01–06** | 完整 `report` / `twin` |
+| 对话或评测里的**短问答**（题干已有表、只要一个结论） | **教练短问答**（调用方法库或本目录**单次**计算） | 对话里答完；**不出** 01–06 报告 |
+| 离线批量刷 LongevityBench 分 | 仅 [`workflows/bench.md`](workflows/bench.md) / `la.py bench` | **评测适配器**，非产品主路径 |
+
+Do not start 01–06 for exam or short-Q prompts. Do not write exam scores into the member report. Default answer ingredients: **method library when schema matches**, else **Host + tools**. Never download Longevity-LLM as a Skill dependency; optional `--control-model` is对照 only. Gate helpers refuse PhenoAge without chronological age, fixed CpG clocks on rotating sites, and OpenGenes/SynergyAge when the gene is masked.
+
 ## Routing Rules
 
 1. New data folder → start at workflow 01 and walk 01 → 02 → 03 → 04 → 04b → 04c → 05 → 06 in order. Never skip
@@ -68,12 +80,13 @@ library path in the workspace, so later commands find it without any environment
 4. Before every step run `$LA observe <ws>` and act on its `next` line.
    It is the durable state; your memory of earlier turns is not.
 5. Open only the workflow for the current stage.
-6. A LongevityBench prompt is not a member folder. Run `la.py bench` and follow [`workflows/bench.md`](workflows/bench.md). Do not enter workflows 01–06, and do not write the exam answer into the report.
+6. Capability routing uses **input schema** (`la.py schema-route --family … --format …`), not LongevityBench ids. Product short Q&A is answered by **longevity-coach** (methods / single-shot calc in chat). [`workflows/bench.md`](workflows/bench.md) is only for offline LongevityBench scoring batches—not the product entry. Do **not** download Longevity-LLM as the default answer path. Host answers must pass [`workflows/host-protocol.md`](workflows/host-protocol.md). Do not enter workflows 01–06 for exams or short Q&A, and do not write exam scores into the member report.
 
 ## Workflow Index
 
 | Stage | Workflow |
 |---|---|
+| Capability map (A/B/C) and schema vs exam adapters | [`workflows/capabilities.md`](workflows/capabilities.md) |
 | Set up the workspace, inventory files, resolve what each file is, transcribe PDFs | [`workflows/01-intake.md`](workflows/01-intake.md) |
 | Check the machine, tell the user the cost, run pipelines only after consent | [`workflows/02-preflight-pipelines.md`](workflows/02-preflight-pipelines.md) |
 | Run the published methods and native modules through the platform and licence gates | [`workflows/03-methods.md`](workflows/03-methods.md) |
@@ -82,7 +95,8 @@ library path in the workspace, so later commands find it without any environment
 | Insights: genes vs labs, population position, MR projections, the question board (one researcher per question) | [`workflows/04c-insights.md`](workflows/04c-insights.md) |
 | Evidence retrieval and the intervention plan | [`workflows/05-intervene.md`](workflows/05-intervene.md) |
 | Twin snapshot, number trace, independent review, render | [`workflows/06-twin-report.md`](workflows/06-twin-report.md) |
-| One LongevityBench prompt, one route, no member report | [`workflows/bench.md`](workflows/bench.md) |
+| LongevityBench eval adapter (formula / Host / uncovered; no default Longevity-LLM) | [`workflows/bench.md`](workflows/bench.md) |
+| Host output protocol (capability A field + capability B five axes) | [`workflows/host-protocol.md`](workflows/host-protocol.md) |
 
 ## Evidence Contract
 

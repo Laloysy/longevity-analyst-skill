@@ -79,7 +79,30 @@ def _predict(row: Dict[str, float], model: dict) -> float:
         total += model["coef"][i] * ((value - model["mean"][i]) / scale)
     a = float(model.get("calibrate_a", 1.0) or 1.0)
     b = float(model.get("calibrate_b", 0.0) or 0.0)
-    return a * total + b
+    age = a * total + b
+    # Optional train-only isotonic map (X/y thresholds); does not use eval labels.
+    xs = model.get("isotonic_x") or []
+    ys = model.get("isotonic_y") or []
+    if xs and ys and len(xs) == len(ys):
+        # np-free piecewise linear clip interpolation
+        if age <= xs[0]:
+            return float(ys[0])
+        if age >= xs[-1]:
+            return float(ys[-1])
+        lo, hi = 0, len(xs) - 1
+        while lo + 1 < hi:
+            mid = (lo + hi) // 2
+            if xs[mid] <= age:
+                lo = mid
+            else:
+                hi = mid
+        x0, x1 = xs[lo], xs[hi]
+        y0, y1 = ys[lo], ys[hi]
+        if x1 == x0:
+            return float(y0)
+        t = (age - x0) / (x1 - x0)
+        return float(y0 + t * (y1 - y0))
+    return float(age)
 
 
 def _age_bin(age: float) -> str:
@@ -96,9 +119,14 @@ def _bin_letter(text: str, label: str) -> str:
 
 
 def _model_for_format(fmt: str) -> Optional[dict]:
-    # Table S6: pairwise/multiclass → protein_clock; regression → elasticnet.
-    if fmt in ("pairwise", "multiclass"):
-        return load("clock") or load("elasticnet")
+    # Prefer OrganAge clock (+ optional train-only isotonic) for all formats when
+    # present: pairwise/multiclass match the published clock family; regression
+    # also benefits once isotonic is fitted on the local Allen train split.
+    if fmt in ("pairwise", "multiclass", "regression"):
+        clock = load("clock")
+        if clock:
+            return clock
+        return load("elasticnet")
     return load("elasticnet") or load("clock")
 
 

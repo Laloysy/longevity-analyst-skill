@@ -1,60 +1,67 @@
-# Bench · LongevityBench route
+# Bench · Capability A eval adapter (LongevityBench)
+
+> **非产品主路径。** 产品短问答由 **longevity-coach** 在对话里答（见教练 `references/short-qa.md`）；会员整包数据走 01–06。本文件只服务离线 LongevityBench 刷分 / 对照。
 
 ## Use when
 
-The input is one LongevityBench prompt, not a member's folder. Do not start at workflow 01. Do not write `deliver/report.html` or `twin.json`. Exam scores stay out of the member report.
+The input is one LongevityBench prompt for **batch scoring**, not a member's folder and not a live coach chat. Do not start at workflow 01. Do not write `deliver/report.html` or `twin.json`. Exam scores stay out of the member report.
+
+For schema policy without an exam id, use [`capabilities.md`](capabilities.md) and:
+
+```bash
+python3 <this skill dir>/scripts/la.py schema-route --family clinical_age --format pairwise
+```
+
+This workflow is an **evaluation adapter** that maps a LongevityBench prompt onto the same schema policy. It is not a product path that downloads Longevity-LLM. Default routes are `formula` | `host` | `uncovered` (see `la.py bench` JSON `path`). The `_TASKS` / `LB-xxxx` table in `bench_route.py` is **eval metadata** for scoring tables—not the Skill capability definition.
 
 ## Command
 
 ```bash
-python3 <this skill dir>/scripts/la.py bench --prompt <file> [--lb-id LB-0034] [--follow-up <text>] [--run-model] [--model-path <dir>]
+python3 <this skill dir>/scripts/la.py bench --prompt <file> [--lb-id LB-0034] [--follow-up <text>]
 ```
 
-`--run-model` loads the local Longevity-LLM named in the route. Without it, a model route prints the path and stays `callable: false`.
+- Formula tasks fill `answer` when weights are present.
+- Host tasks return `path: host` and `host_protocol: <format>`; the **Host LLM** produces the exam field. Validate with [`host-protocol.md`](host-protocol.md) / `la.py protocol-check`.
+- Optional对照 only:
 
-## Published best (Table S6)
+```bash
+python3 <this skill dir>/scripts/la.py bench --prompt <file> --lb-id LB-0006 --control-model [--model-path <dir>]
+```
 
-Parity uses the better of ML and Best LLM. Pairwise = concordance, binary/multiclass = balanced accuracy, regression = MAE.
+`--control-model` writes `control_answer` from a paper Longevity-LLM. It never becomes the default `answer`. Bulk control scoring lives under `week_6/sample/` (see `week_6/eval/README.md`).
 
-| Task | Id | Call | Published best | Local score |
+`--lb-id` is an eval-table hint. Routing is by family/format and whether a formula can run, not by "task id → download model".
+
+## Default path table
+
+| Task | Id | Default path | Target / note | Published reference |
 | --- | --- | --- | --- | --- |
-| Clinical age, pairwise | LB-0034 | `clinical_hgb` | 0.81 | 0.811 |
-| Clinical age, multiclass | LB-0030 | `clinical_elasticnet` | 0.43 | 0.452 |
-| Clinical age, regression | LB-0038 | `clinical_elasticnet` | 11.55 | 11.97 |
-| Clinical mortality, binary | LB-0042 | `clinical_cox` | 0.81 | 0.807 |
-| Clinical mortality, pairwise | LB-0050 | `L-Qwen3.5-9B` (MLX 4-bit) | 0.684 | scoring via `run_step3_scores.sh` |
-| Clinical mortality, multiclass | LB-0046 | `L-Qwen3.5-9B` (MLX 4-bit) | 0.389 | same |
-| Methylation, pairwise | LB-0006 | `L-Qwen3.5-9B` (MLX 4-bit) | 0.868 | stride-5 interim then full |
-| Methylation, regression | LB-0010 | `L-Qwen3.5-9B` (MLX 4-bit) | 12.96 | same |
-| Methylation, multiclass | LB-0002 | `L-Qwen3.5-9B` (MLX 4-bit) | 9B Table S3 (task-best grok-4 0.203) | same |
-| Transcriptome, pairwise | LB-0018 / LB-0220 | `L-Qwen3.5-9B` (MLX 4-bit) | 0.676 | 0.624 (n=900) |
-| Transcriptome, multiclass | LB-0014 | `L-Qwen3.5-9B` (MLX 4-bit) | 0.223 | scoring next |
-| Plasma protein, pairwise | LB-0299 | `protein_clock` | 0.75 | 0.752 |
-| Plasma protein, multiclass | LB-0074 | `protein_clock` | 0.56 | 0.636 |
-| Plasma protein, regression | LB-0082 | `protein_elasticnet` | 3.94 | 4.37 |
-| OpenGenes, masked name | LB-0086 | `L-LFM2-1.2B` | 0.780 | 0.765 |
-| SynergyAge, pairwise | LB-0122 | `L-Qwen3.5-9B` (MLX 4-bit) | 0.846 | not scored locally yet (S3: 9B 0.731) |
-| SynergyAge, regression | LB-0126 | `L-Qwen3.5-9B` (MLX 4-bit) | 11.96 | not scored locally yet (S3: 9B 12.38) |
+| Clinical age, pairwise | LB-0034 | formula | `clinical_hgb` | 0.81 |
+| Clinical age, multiclass | LB-0030 | formula | `clinical_elasticnet` | 0.43 |
+| Clinical age, regression | LB-0038 | formula | `clinical_elasticnet` | 11.55 MAE |
+| Clinical mortality, binary | LB-0042 | formula | `clinical_cox` | 0.81 |
+| Clinical mortality, pairwise | LB-0050 | Host+tools | host; control: L-Qwen3.5-9B | 0.684 |
+| Clinical mortality, multiclass | LB-0046 | Host+tools | host; control: L-Qwen3.5-9B | 0.389 |
+| Methylation, pairwise | LB-0006 | Host+tools | host; fixed clocks in do_not_call | 0.868 |
+| Methylation, regression | LB-0010 | Host+tools | host | 12.96 MAE |
+| Methylation, multiclass | LB-0002 | Host+tools | host | see paper_best |
+| Transcriptome, pairwise | LB-0018 / LB-0220 | Host+tools | host | 0.676 |
+| Transcriptome, multiclass | LB-0014 | Host+tools | host | 0.223 |
+| Plasma protein, pairwise | LB-0299 | formula | `protein_clock` | 0.75 |
+| Plasma protein, multiclass | LB-0074 | formula | `protein_clock` | 0.56 |
+| Plasma protein, regression | LB-0082 | formula | `protein_elasticnet` | 3.94 MAE |
+| OpenGenes, masked name | LB-0086 | Host+tools | host; control: L-LFM2-1.2B | 0.780 |
+| SynergyAge, pairwise | LB-0122 | Host+tools | host; do not query SynergyAge | 0.846 |
+| SynergyAge, regression | LB-0126 | Host+tools | host; do not query SynergyAge | 11.96 MAE |
 
-Local Cox control on mortality pairwise / multiclass: concordance 0.631 and balanced_acc 0.329. Those are not the parity targets.
+Published reference numbers are对照 baselines, not Skill pass criteria. Missing formula weights → `path: uncovered`.
 
-## Open models
+## Formula assets
 
-| Paper name | Repository | Local path |
-| --- | --- | --- |
-| L-Qwen3.5-9B | `insilicomedicine/longevity-llm` | `week_6/sample/data/hf/longevity-llm` (+ MLX 4-bit at `longevity-llm-mlx-4bit`) |
-| L-LFM2-1.2B | `LiquidAI/LFM2-1.2B-Longevity` | `week_6/sample/data/hf/LFM2-1.2B-Longevity` |
-
-## Protein
-
-- Pairwise / multiclass (`protein_clock`): `fit_protein.py --goeminne <Conventional_coefs.csv>` loads OrganAge Conventional fold-0, then affine-calibrates on Allen train (eval kitGuids dropped). Weights: `data/protein_clock.json`.
-- Regression (`protein_elasticnet`): `fit_protein.py <olink_wide.csv>` fits ElasticNetCV on ~392 consensus proteins, Allen Imm-of-Aging after dropping 42 eval kitGuids (train n=178). **Not** the paper's official Olink train split. Weights: `data/protein_elasticnet.json`.
-- Details: `week_6/sample/data/olink/SOURCE.txt`. Aggregate scores: `week_6/sample/data/scores_formula.json`.
-
-## Clinical features
-
-Prompt union mask (LB-0034/0030/0038/0042) is `data/clinical_feature_mask.json` (29 labs = `clinical_age._FEATURES`). HGB / elasticnet / Cox train on NHANES 2003–2017 only; 1999/2001 are eval.
+- Clinical: `data/clinical_models.joblib`, `data/clinical_cox.json` (NHANES 2003–2017 train; 1999/2001 eval).
+- Protein clock / elasticnet: `data/protein_clock.json`, `data/protein_elasticnet.json` (see `week_6/sample/data/olink/SOURCE.txt`).
+- Aggregate formula scores: `week_6/sample/data/scores_formula.json`.
 
 ## Output
 
-One field is added only after `callable` is true. A member-facing age still comes from the fixed-feature clocks in workflow 03.
+One exam field is added only after a formula caller sets `callable: true`, or after the Host supplies a field that passes `protocol-check`. A member-facing age still comes from the fixed-feature clocks in workflow 03.
