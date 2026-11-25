@@ -22,6 +22,7 @@ from lalib import board, causal, genomics, pgx, reference, surveillance, wearabl
 from lalib import common as C  # noqa: E402
 from lalib import evidence, integrate, intake, methods, organs, pipelines, preflight, report, twin  # noqa: E402
 from lalib import (  # noqa: E402
+    age_evidence,
     bench_route,
     clinical_age,
     clinical_mortality,
@@ -157,6 +158,17 @@ def cmd_protocol_check(a):
         result = host_protocol.check_jarchow(a.json_path)
     C.emit(result)
     return C.EXIT_OK if result.get("ok") else C.EXIT_BLOCKED
+
+
+def cmd_age_evidence(a):
+    """Calculators for age / who-is-older / survival questions on pasted measurements. No workspace, no report."""
+    got = age_evidence.read_input(a.file or None, a.text or None, a.from_transcript)
+    if got.get("problem"):
+        raise C.LAError(got["problem"], C.EXIT_USAGE)
+    result = age_evidence.run(a.modality, got["text"], a.bands or None)
+    result["input"] = {"source": got["source"], "chars": len(got["text"])}
+    C.emit(result)
+    return C.EXIT_OK
 
 
 # ---------------------------------------------------------------- setup
@@ -1200,6 +1212,18 @@ def build_parser():
     s.add_argument("--verdict", choices=["pass", "block"])
     s.add_argument("--findings")
     s.set_defaults(fn=cmd_review)
+
+    s = sub.add_parser(
+        "age-evidence",
+        help="evidence for how old someone looks / who is older / survival, from pasted labs or omics (no workspace)",
+    )
+    s.add_argument("--modality", required=True, choices=list(age_evidence.MODALITIES))
+    s.add_argument("--file", default="", help="text file with the measurements (the user's message is fine)")
+    s.add_argument("--text", default="", help="the measurements inline (short panels)")
+    s.add_argument("--from-transcript", action="store_true", dest="from_transcript",
+                   help="read the latest user message from this session's Claude Code / Codex transcript")
+    s.add_argument("--bands", default="", help="age bands offered, e.g. '18-30,30-45,45-60,60-75,75+'")
+    s.set_defaults(fn=cmd_age_evidence)
 
     s = sub.add_parser(
         "schema-route",

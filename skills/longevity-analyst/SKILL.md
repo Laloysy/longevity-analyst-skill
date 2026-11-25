@@ -1,7 +1,15 @@
 ---
 name: longevity-analyst
 description: >
-  Turns one person's longevity / anti-aging test data (WGS or VCF, DNA
+  Use first for any question that asks how old a person is or looks, their
+  age group, which of two people is older, or whether / how long someone
+  survives, when the message already contains measured values (a blood
+  test panel, DNA methylation beta values even when hundreds of CpG sites
+  are listed, Olink or other plasma protein
+  levels, gene expression): `la.py age-evidence` returns calibrated
+  estimates (lab age with interval, survival probability, which profile
+  looks older) that judging the numbers by eye cannot match. Also
+  turns one person's longevity / anti-aging test data (WGS or VCF, DNA
   methylation, gut metagenome, plasma proteomics, lab reports and PDFs) into a
   multi-omics report, a digital-twin snapshot and an evidence-cited
   intervention plan, running local nf-core pipelines after a preflight check.
@@ -18,11 +26,41 @@ license: MIT
 category: health-omics
 metadata:
   author: CancerDAO / zwbao
-  version: "0.8.0"
+  version: "0.8.1"
   tags: longevity aging multiomics digital-twin epigenetic-clock nf-core bioinformatics
 ---
 
 # longevity-analyst
+
+## Quick question on pasted measurements (no workspace, no report)
+
+The message already holds a person's measured values and asks how old they are or look, their age group, which of
+two is older, or whether / how long they survive:
+
+1. Pick the modality yourself: `labs` (blood panel, clinical values), `methylation` (CpG beta values), `proteome`
+   (Olink NPX or other plasma proteins), `expression` (RNA-seq genes).
+2. Run `python3 <this skill dir>/scripts/la.py age-evidence --modality <m> --from-transcript [--bands "18-30,30-45,..."]`.
+   `--from-transcript` reads the user's message itself, so a long profile need not be copied; `--file <path>` takes a
+   saved copy instead. Pass `--bands` with the age bands offered, if any. Check `values_read` / `features_used`.
+3. Weigh the result, then answer:
+   - `lab_age_reference`: the age these labs look like (NHANES 2011-2016 fit, ~10-year error on held-out years).
+     Its error is close to a careful reading, so treat it as a second opinion: when `age_estimate` or the most
+     likely band differs from your own reading, settle between the two. It pulls very old people with healthy labs
+     towards middle age. For two people, `p_A_older_by_lab_age` far from 0.5 is a strong signal.
+   - `survival_cox` (needs the age in the text): 5/10/15-year survival and `p_A_outlives_B_by_cox` from age, sex,
+     BMI and labs only; its discrimination is modest. History, medicines, smoking, frailty in the text are not in
+     it: weigh them yourself, and when `cox_comparison_strength` says it cannot separate two people, decide from them.
+     For how long someone survived or will survive (time bands), go by your own reading; Cox is only a check.
+   - `age_direction_vote` (two omics profiles): share > 0.5 means A looks older; stronger the further from 0.5 and
+     the more features used.
+   - `single_profile.predicted_age` (one protein profile): a published plasma clock; rough when few clock proteins.
+   - methylation single profile and expression: no calibrated estimator; reason from the listed features and biology.
+   Do not override a calculator by eyeballing a few single markers: it already weighs all of them. Adjust only for
+   information it does not use (history, medicines, an age already given) and say so.
+4. Answer in the format asked; for a multiple-choice question end with the option letter alone. When one choice is
+   required, give the most likely option, not "uncertain". Do not
+   start workflow 01 and do not write a report for this.
+
 
 A member's raw test folder goes in; `deliver/report.html`, `deliver/report.md`
 and `deliver/twin.json` come out. The work runs through one harness,
