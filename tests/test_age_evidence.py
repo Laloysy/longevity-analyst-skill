@@ -64,8 +64,36 @@ def test_methylation_pair_vote_follows_age_direction():
 
 
 def test_expression_and_bad_modality_say_so():
-    assert AE.run("expression", "GENE1 (3.2)")["status"] == "no_reference"
+    single = AE.run("expression", "GENE1 (3.2)")
+    assert single.get("status") == "no_calibrated_estimator"
     assert AE.run("bogus", "x")["status"] == "bad_input"
+
+
+def test_expression_top_list_vote_runs():
+    rises = ["CDKN1A", "C1QA", "C1QB", "IL6", "SERPINE1", "GDF15", "TIMP1", "COL1A1"]
+    falls = ["PRM1", "PRM2", "TNP1", "ND1", "COX1"]
+    # A looks older: more senescence/inflammation genes early; fewer germline markers
+    a_genes = rises + falls[2:] + [f"FILL{i}" for i in range(40)]
+    b_genes = falls + rises[4:] + [f"FILL{i}" for i in range(40)]
+    text = (
+        "Which of the following two Testis samples comes from an older individual?\n"
+        "Options: A. Sample A  B. Sample B\n"
+        "Sample a: Demographic information: male\n"
+        "Top-400 expressed genes: " + "; ".join(a_genes) + "\n"
+        "Sample b: Demographic information: male\n"
+        "Top-400 expressed genes: " + "; ".join(b_genes) + "\n"
+        "GSEA results:\n"
+        "Sample-A shows high activity in Complement Cascade (NES: 0.40, genes: C3, C1QA), "
+        "while Sample-B shows low activity (NES: -0.10, genes: C3, C1QA). "
+        "Sample-A shows low activity in Mitochondrial Translation (NES: -0.20, genes: MRPL14), "
+        "while Sample-B shows high activity (NES: 0.35, genes: MRPL14).\n"
+    )
+    out = AE.run("expression", text)
+    vote = out["age_direction_vote"]
+    assert vote["status"] == "ok"
+    assert vote["outputs"]["looks_older"] == "A"
+    assert vote["outputs"]["gsea_pathways_used"] >= 1
+    assert vote["outputs"]["fusion"] == "fused"
 
 
 def test_cli_reads_text_and_emits_json():

@@ -11,6 +11,20 @@ python3 <this skill dir>/scripts/la.py protocol-check --kind jarchow --json <fil
 
 Exit code 0 = pass; non-zero = fail. Do not write exam or judge output into `deliver/report.html` or `twin.json`.
 
+## Host call checklist (order)
+
+1. `la.py schema-route --family … --format …` — if `formula` and wired, call the formula caller; Host must not invent that number.
+2. `la.py method-gate …` — refuse wrong methods (see below).
+3. Evidence tools (pick by input shape):
+   - pasted labs / methylation / proteome / expression → `la.py age-evidence --modality …`
+     (expression fuses top-gene vote with contrastive ssGSEA already in the prompt)
+   - masked OpenGenes exam prose → `la.py prompt-evidence --kind opengenes-masked`
+   - SynergyAge exam with printed `% lifespan` → `la.py prompt-evidence --kind synergyage-pairwise`
+   - clinical mortality pairwise/binary/multiclass → `la.py mortality-evidence --format …`
+     (Cox is evidence; history keywords force low confidence)
+4. Emit **one** LongevityBench field (or Jarchow JSON).
+5. `la.py protocol-check …`
+
 ## Method library gates (before Host)
 
 When schema matches a published formula/comparator, call the method library first (`la.py schema-route`). Host must **not** invent numbers those callers already compute. Deterministic gates:
@@ -26,6 +40,17 @@ python3 <this skill dir>/scripts/la.py method-gate safety --flags-json '{"cushin
 
 `phenoage-chrono` refuses PhenoAge-family methods when chronological age is absent (pass `--has-chrono-age` only when age is known). `gene-db` refuses OpenGenes / SynergyAge when the gene is masked (pass `--gene-named` only for a real member symbol). Host may call these as read-only tools; it must not query those databases on masked-gene exam prompts, and must not treat fixed-site clocks as applicable to rotating-site methylation prompts.
 
+## How to use evidence JSON
+
+| Tool result | Host action |
+| --- | --- |
+| `looks_older` / `suggested_letter` and **not** `low_confidence` / `confidence` is medium\|high | Prefer that letter as the exam field |
+| `low_confidence: true`, `confidence: low`, near-tie share, or empty evidence | Prefer `uncertain` / `cannot_tell` (LongevityBench) or say evidence is weak in member chat |
+| Multiple-choice and tool has a lean | May give the most-likely letter and state uncertainty in prose **outside** the exam field |
+| Clinical mortality Cox survival curves | Evidence only; Host weighs time-band / history / meds — do not treat `survival_probability` alone as the final answer |
+
+Masked-gene and rotating-site methylation exams: **always** run `method-gate` then `prompt-evidence` / `age-evidence` before answering.
+
 ## LongevityBench (capability A)
 
 One prompt → **one** parseable field. No multi-line prose, no report narrative.
@@ -34,10 +59,10 @@ One prompt → **one** parseable field. No multi-line prose, no report narrative
 | --- | --- |
 | `pairwise` | Single letter `A`–`D`, short token (`yes`/`no`, `increase`/`decrease`), or honest abstain (`uncertain` / `cannot_tell`) |
 | `binary` | Same as pairwise |
-
-**Abstain:** when evidence is inside the model error band (clinical pairwise) or there is no calibrated comparator (e.g. transcriptome top-gene lists), emit `uncertain` instead of guessing. Product short-QA should say so in plain language; do not open 01–06.
 | `multiclass` | Single letter, or an age/survival bin label (e.g. `50-55`, `0-5`) |
 | `regression` | Single number (optional `%` suffix stripped for lifespan-percent tasks) |
+
+**Abstain:** when evidence is inside the model error band (clinical pairwise), `age-evidence` / `prompt-evidence` marks `low_confidence`, or there is no usable comparator, emit `uncertain` instead of guessing. Product short-QA should say so in plain language; do not open 01–06.
 
 After answering, run `protocol-check`. Soft Hosts that dump explanations fail the gate—retry with a stricter instruction to emit only the field. The checker also rejects answers over a short character cap or with prose markers (`because`, `based on`, …).
 

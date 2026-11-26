@@ -28,7 +28,9 @@ from lalib import (  # noqa: E402
     clinical_mortality,
     host_protocol,
     method_gate,
+    mortality_host,
     open_llm,
+    prompt_evidence,
     protein_age,
 )
 
@@ -169,6 +171,28 @@ def cmd_age_evidence(a):
     result["input"] = {"source": got["source"], "chars": len(got["text"])}
     C.emit(result)
     return C.EXIT_OK
+
+
+def cmd_prompt_evidence(a):
+    """Structured evidence from exam prompt text only (masked gene / SynergyAge % effects). No DB lookup."""
+    got = age_evidence.read_input(a.file or None, a.text or None, False)
+    if got.get("problem"):
+        raise C.LAError(got["problem"], C.EXIT_USAGE)
+    result = prompt_evidence.run(a.kind, got["text"])
+    result["input"] = {"source": got["source"], "chars": len(got["text"])}
+    C.emit(result)
+    return C.EXIT_OK if result.get("status") != "bad_input" else C.EXIT_USAGE
+
+
+def cmd_mortality_evidence(a):
+    """Host evidence for clinical mortality exams: Cox ordering + history flags (not a product formula path)."""
+    got = age_evidence.read_input(a.file or None, a.text or None, False)
+    if got.get("problem"):
+        raise C.LAError(got["problem"], C.EXIT_USAGE)
+    result = mortality_host.evidence(got["text"], a.format, follow=a.follow_up or "")
+    result["input"] = {"source": got["source"], "chars": len(got["text"])}
+    C.emit(result)
+    return C.EXIT_OK if result.get("status") not in {"bad_input", "unavailable"} else C.EXIT_USAGE
 
 
 # ---------------------------------------------------------------- setup
@@ -1224,6 +1248,25 @@ def build_parser():
                    help="read the latest user message from this session's Claude Code / Codex transcript")
     s.add_argument("--bands", default="", help="age bands offered, e.g. '18-30,30-45,45-60,60-75,75+'")
     s.set_defaults(fn=cmd_age_evidence)
+
+    s = sub.add_parser(
+        "prompt-evidence",
+        help="Host tool: parse exam prompt text only (opengenes-masked / synergyage-pairwise); no gene DB",
+    )
+    s.add_argument("--kind", required=True, choices=list(prompt_evidence.KINDS))
+    s.add_argument("--file", default="", help="prompt text file")
+    s.add_argument("--text", default="", help="prompt inline")
+    s.set_defaults(fn=cmd_prompt_evidence)
+
+    s = sub.add_parser(
+        "mortality-evidence",
+        help="Host tool: Cox evidence for mortality exams (pairwise/binary/multiclass); not default formula path",
+    )
+    s.add_argument("--format", required=True, choices=["binary", "pairwise", "multiclass"])
+    s.add_argument("--file", default="", help="prompt text file")
+    s.add_argument("--text", default="", help="prompt inline")
+    s.add_argument("--follow-up", default="", dest="follow_up", help="optional SEQN / follow-up text")
+    s.set_defaults(fn=cmd_mortality_evidence)
 
     s = sub.add_parser(
         "schema-route",

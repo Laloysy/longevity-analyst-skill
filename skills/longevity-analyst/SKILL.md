@@ -54,7 +54,8 @@ two is older, or whether / how long they survive:
    - `age_direction_vote` (two omics profiles): share > 0.5 means A looks older; stronger the further from 0.5 and
      the more features used.
    - `single_profile.predicted_age` (one protein profile): a published plasma clock; rough when few clock proteins.
-   - methylation single profile and expression: no calibrated estimator; reason from the listed features and biology.
+   - methylation single profile: no calibrated estimator; reason from the listed CpGs and biology.
+   - expression: two Top-N gene lists → literature gene-set direction vote (`age_direction_vote`); single profile still has no calibrated age. Masked-gene / SynergyAge exam prose → `la.py prompt-evidence` (no DB).
    Do not override a calculator by eyeballing a few single markers: it already weighs all of them. Adjust only for
    information it does not use (history, medicines, an age already given) and say so.
 4. Answer in the format asked; for a multiple-choice question end with the option letter alone. When one choice is

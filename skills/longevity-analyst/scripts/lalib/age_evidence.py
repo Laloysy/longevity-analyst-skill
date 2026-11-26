@@ -12,8 +12,9 @@ Methods (each result names its source and how it was checked):
   methylation/proteome, two people   age-direction vote over every CpG/protein with a published age association
                    (Generation Scotland EWAS; China Kadoorie Biobank Olink), neither a LongevityBench source.
   proteome, one person   Goeminne et al. OrganAge conventional plasma clock (data/protein_clock.json).
-  methylation, one person / expression   no calibrated single-profile estimator here: the strongest age-associated
-                   features present are listed so the host can reason from them.
+  methylation, one person   no calibrated single-profile estimator: strongest age-associated CpGs listed for the host.
+  expression, two top-lists   literature gene-set direction vote on Sample A/B Top-N genes (not GTEx-fitted);
+                   low_confidence when few hits or near-tie → Host should prefer uncertain.
 
 Standard library only.
 """
@@ -28,7 +29,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .agekit import compare, panel, reference
+from .agekit import compare, expression_vote, panel, reference
 from .agekit.library import Library
 
 SKILL_DIR = Path(__file__).resolve().parents[2]
@@ -233,10 +234,21 @@ def omics(text: str, modality: str, bands: Optional[str]) -> Dict[str, Any]:
 
 
 def expression(text: str) -> Dict[str, Any]:
-    return {"modality": "expression", "status": "no_reference",
-            "message": "This skill has no transcriptomic age reference that is independent of GTEx, so it computes nothing "
-                       "here. Reason from tissue biology (immune/complement/senescence genes tend to rise with age; "
-                       "collagen, developmental and mitochondrial genes tend to fall) and say how sure you are."}
+    """Pairwise top-gene lists → literature direction vote; else honest single-profile stub."""
+    genes_a, genes_b = expression_vote.parse_top_lists(text)
+    if len(genes_a) >= 10 and len(genes_b) >= 10:
+        vote = expression_vote.compare_top_lists(SKILL_DIR, text)
+        return {"modality": "expression", "two_profiles": True, "age_direction_vote": vote}
+    return {
+        "modality": "expression",
+        "two_profiles": False,
+        "status": "no_calibrated_estimator",
+        "message": "No single-profile transcriptomic age estimator independent of GTEx. "
+                   "For two Top-N gene lists, paste both Sample A/B blocks so the literature "
+                   "gene-set vote can run. Otherwise reason from tissue biology and say how sure you are.",
+        "tissue": expression_vote.parse_tissue(text),
+        "n_genes_parsed": max(len(genes_a), len(genes_b)),
+    }
 
 
 def run(modality: str, text: str, bands: Optional[str] = None) -> Dict[str, Any]:
