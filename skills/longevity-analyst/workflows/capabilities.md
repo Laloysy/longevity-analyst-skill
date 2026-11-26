@@ -8,7 +8,7 @@ LongPi analyst work is organized by **three transferable capabilities**. Benchma
 | --- | --- | --- | --- |
 | **A · Verifiable table reading** | Single-modality table or vignette → parseable age / who-older / bin / 10-year survival | LongevityBench | Accept |
 | **B · Bounded intervention advice** | Biomarker vignette → structured advice with safety gates | Jarchow five axes (fixed 10-item subset) | Accept |
-| **C · Intervention response reading** | Same-person pre/post molecular profiles → multi-clock panel vs noise band | Sehgal / TranslAGE; ClockBase-style discovery later | Interface only |
+| **C · Intervention response reading** | Same-person pre/post → change vs noise; clocks: prefer reliable panel, multi-clock agree, short-term ≠ lifespan | Eval: capability_c rules (epigenetic probe); discovery mining is appendix only | **Narrative thin accept** (coach retest-response); no full-trial library in default path |
 
 ## How the analyst chooses a path (schema, not task id)
 
@@ -31,5 +31,10 @@ LongevityBench `LB-xxxx` ids appear only in [`bench.md`](bench.md) as an **eval 
 - LongevityBench / Jarchow exam scores
 - Longevity-LLM control answers
 - Task ids as if they were clinical findings
+- Intervention-response heatmaps, board ranks, or short-term clock deltas presented as proven lifespan gain
 
-Member-facing ages still come from fixed-feature clocks in workflow 03.
+Member-facing ages still come from fixed-feature clocks in workflow 03. Capability C may narrate pre/post change vs noise; it must not overwrite that age with a short clock delta.
+
+## Capability C (thin)
+
+When the Host or coach narrates methylation / clock retests: follow `week_6/eval/capability_c/sehgal_rules.md` (preferred clocks, dual consistency, noise band, short-term ≠ lifespan). Do **not** add a default dependency on any full multi-trial clock-response platform.

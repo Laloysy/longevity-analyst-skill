@@ -137,6 +137,12 @@ def cmd_method_gate(a):
         if a.flags_json:
             flags = json.loads(Path(a.flags_json).read_text() if Path(a.flags_json).is_file() else a.flags_json)
         result = method_gate.safety_gate_intervention(flags)
+    elif a.action == "safety-scan":
+        got = age_evidence.read_input(a.file or None, a.text or None, False)
+        if got.get("problem"):
+            raise C.LAError(got["problem"], C.EXIT_USAGE)
+        result = method_gate.scan_intervention_vignette(got["text"])
+        result["input"] = {"source": got["source"], "chars": len(got["text"])}
     else:
         raise C.LAError(f"unknown method-gate action {a.action!r}", C.EXIT_USAGE)
     C.emit(result)
@@ -1290,6 +1296,7 @@ def build_parser():
             "phenoage-chrono",
             "gene-db",
             "safety",
+            "safety-scan",
         ],
     )
     s.add_argument("--marker", default="")
@@ -1311,6 +1318,8 @@ def build_parser():
         help="gene-db: real gene symbol is known (member lookup allowed)",
     )
     s.add_argument("--flags-json", default="", dest="flags_json", help="JSON object or path for safety flags")
+    s.add_argument("--file", default="", help="safety-scan: vignette text file")
+    s.add_argument("--text", default="", help="safety-scan: vignette inline")
     s.set_defaults(fn=cmd_method_gate)
 
     s = sub.add_parser("bench", help="eval adapter: route one LongevityBench prompt (formula|host|uncovered)")
